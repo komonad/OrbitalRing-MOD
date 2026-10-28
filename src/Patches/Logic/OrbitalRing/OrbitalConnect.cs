@@ -45,6 +45,7 @@ namespace ProjectOrbitalRing.Patches.Logic.OrbitalRing
         }
 
         [HarmonyPostfix]
+        [HarmonyPriority(Priority.Last)]
         [HarmonyPatch(typeof(BuildTool_Path), "DeterminePreviews")]
         public static void BuildTool_Path_DeterminePreviews_PostPatch(BuildTool_Path __instance)
         {
@@ -98,6 +99,55 @@ namespace ProjectOrbitalRing.Patches.Logic.OrbitalRing
 
                 }
 
+            }
+            AlignOrbitalPreviews(__instance.buildPreviews);
+        }
+
+        private static void AlignOrbitalPreviews(List<BuildPreview> previews)
+        {
+            for (int index = 0; index < previews.Count; index++)
+            {
+                BuildPreview preview = previews[index];
+                int itemId = preview.item.ID;
+                if (itemId != ProtoID.I轨道连接组件
+                    && itemId != ProtoID.I粒子加速轨道
+                    && itemId != ProtoID.I星环电网组件)
+                {
+                    continue;
+                }
+
+                Vector3 up = preview.lpos.normalized;
+                Vector3 forward = preview.lrot * Vector3.forward;
+                if (preview.output != null && preview.output.item.ID == itemId)
+                {
+                    forward = preview.output.lpos - preview.lpos;
+                }
+                else if (preview.input != null && preview.input.item.ID == itemId)
+                {
+                    forward = preview.lpos - preview.input.lpos;
+                }
+                else if (previews.Count > 1)
+                {
+                    int neighborIndex = index + 1 < previews.Count ? index + 1 : index - 1;
+                    Vector3 tangent = previews[neighborIndex].lpos - preview.lpos;
+                    forward = Vector3.Dot(forward, tangent) < 0 ? -tangent : tangent;
+                }
+                else
+                {
+                    Vector3 tangent = Vector3.Cross(Vector3.up, up);
+                    forward = Vector3.Dot(forward, tangent) < 0 ? -tangent : tangent;
+                }
+
+                forward = Vector3.ProjectOnPlane(forward, up);
+                Vector3 ringTangent = Vector3.Cross(Vector3.up, up).normalized;
+                forward = Vector3.Dot(forward, ringTangent) < 0 ? -ringTangent : ringTangent;
+                if (forward.sqrMagnitude > 0.000001f && up.sqrMagnitude > 0.000001f)
+                {
+                    // Snapped positions define the native port tangent and radial orientation.
+                    preview.lrot = Quaternion.LookRotation(forward.normalized, up);
+                    preview.lrot2 = preview.lrot;
+                }
+                preview.lpos2 = preview.lpos;
             }
         }
 
@@ -390,6 +440,7 @@ namespace ProjectOrbitalRing.Patches.Logic.OrbitalRing
             (int ringBeltIndex, int ringIndex) = CalculateRingPosMark(__instance.entityPool[beltEntityId].pos, GetLayout(__instance.planet));
             var planetOrbitalRingData = OrbitalStationManager.Instance.GetPlanetOrbitalRingData(__instance.planet.id);
             planetOrbitalRingData.Rings[ringIndex].CheckRingIsComplete(__instance, beltId, ringBeltIndex, itemId);
+            global::ProjectOrbitalRing.Rendering.OrbitalTrackVisuals.Schedule(__instance, beltEntityId);
         }
 
         // 拆除/击毁函数移动到OrbitalBuild里，待删除

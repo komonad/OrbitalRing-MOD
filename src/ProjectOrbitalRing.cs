@@ -15,6 +15,7 @@ using crecheng.DSPModSave;
 using NebulaAPI;
 using NebulaAPI.Interfaces;
 using ProjectOrbitalRing.Compatibility;
+using ProjectOrbitalRing.Rendering;
 using ProjectOrbitalRing.Patches.Logic;
 using ProjectOrbitalRing.Patches.Logic.AddVein;
 using ProjectOrbitalRing.Patches.Logic.MegaAssembler;
@@ -177,6 +178,8 @@ namespace ProjectOrbitalRing
         #endregion NebulaModAPI
 
             Harmony = new Harmony(MODGUID);
+            Harmony.PatchAll(typeof(OrbitalConstructionOrientation));
+            Harmony.PatchAll(typeof(TrackRenderPatches));
 
             ResearchLabPatches.ApplyPatch(Harmony);
             MoonPatch.ApplyPatch(Harmony);
@@ -207,7 +210,21 @@ namespace ProjectOrbitalRing
 
         private void Update()
         {
+            OrbitalTrackVisuals.Update();
             if (VFInput.inputing) return;
+        }
+
+        private void OnDestroy()
+        {
+            OrbitalTrackVisuals.Dispose();
+        }
+
+        private void LateUpdate()
+        {
+            TrackRenderer.Update(GameMain.localPlanet?.factory, GameCamera.main);
+            TrackRenderer.Draw(GameMain.localPlanet?.factory, GameCamera.main);
+            OrbitalRingBraces.Draw(GameMain.localPlanet?.factory, GameCamera.main);
+            OrbitalFacilityAttachments.Draw(GameMain.localPlanet?.factory, GameCamera.main);
         }
 
         public void Export(BinaryWriter w)
@@ -230,6 +247,7 @@ namespace ProjectOrbitalRing
 
         public void Import(BinaryReader r)
         {
+            OrbitalTrackVisuals.Reset();
             int version = r.ReadInt32();
             importVersion = version;
             MegaAssemblerPatches.Import(r);
@@ -249,6 +267,7 @@ namespace ProjectOrbitalRing
 
         public void IntoOtherSave()
         {
+            OrbitalTrackVisuals.Reset();
             MegaAssemblerPatches.IntoOtherSave();
             PlanetFocusPatches.IntoOtherSave();
             QuantumStoragePatches.IntoOtherSave();
@@ -360,6 +379,7 @@ namespace ProjectOrbitalRing
             ItemProto.stationCollectorId = ProtoID.I轨道采集器;
 
             ItemPostFix();
+            OrbitalTrackVisuals.Register();
 
             StorageComponent.staticLoaded = false;
             StorageComponent.LoadStatic();
