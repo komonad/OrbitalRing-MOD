@@ -56,7 +56,15 @@ namespace ProjectOrbitalRing.Rendering
                 }
             }
 
-            marker.Box(center + up * 1.06f + along * 0.925f, across, up, along, new Vector3(0.80f, 0.035f, 0.025f));
+            Vector3 indicator = center + up * 1.06f + along * 0.925f;
+            if (marker.IsDistant)
+            {
+                marker.Panel(indicator + up * 0.0175f, across, along, up, 0.80f, 0.025f);
+            }
+            else
+            {
+                marker.Box(indicator, across, up, along, new Vector3(0.80f, 0.035f, 0.025f));
+            }
         }
 
         internal static Vector2 SeatLongitudes(PlanetFactory factory, int slot)

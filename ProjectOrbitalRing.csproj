@@ -286,6 +286,7 @@
     <EmbeddedResource Include="assets\sprite\*.png" />
     <EmbeddedResource Include="assets\texture\chemical-plant-recipe-fcol-for-orbitalring.png" />
     <EmbeddedResource Include="assets\texture\chemical-plant-recipe-fcol.png" />
+    <EmbeddedResource Include="assets\texture\orbital-brace-mount-normal.png" />
     <EmbeddedResource Include="assets\texture\中文图标.png" />
     <EmbeddedResource Include="assets\texture\人造恒星MK2材质.png" />
     <EmbeddedResource Include="assets\texture\创世Logo新春贺岁版.png" />

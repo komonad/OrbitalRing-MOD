@@ -11,6 +11,9 @@ namespace ProjectOrbitalRing.Rendering
 {
     internal static class OrbitalFacilityAttachments
     {
+        private const float DistantOrthographicSize = 120;
+        private const float DistantCameraAltitude = 160;
+
         internal enum Surface
         {
             Armor,
@@ -69,6 +72,8 @@ namespace ProjectOrbitalRing.Rendering
             internal int Generation;
             internal readonly Mesh[] Meshes = new Mesh[(int)Surface.UnavailableLight + 1];
             internal readonly List<Mesh>[] VisibleMeshes = new List<Mesh>[(int)Surface.UnavailableLight + 1];
+            internal readonly Mesh[] DistantMeshes = new Mesh[(int)Surface.UnavailableLight + 1];
+            internal readonly List<Mesh>[] DistantVisibleMeshes = new List<Mesh>[(int)Surface.UnavailableLight + 1];
             internal IEnumerator<object> Work;
             internal bool Stale;
             internal int SocketCount;
@@ -76,6 +81,7 @@ namespace ProjectOrbitalRing.Rendering
             internal int BeamInterfaceCount;
             internal int PowerInterfaceCount;
             internal int TriangleCount;
+            internal int DistantTriangleCount;
         }
 
         private static PlanetFactory observedFactory;
@@ -83,9 +89,13 @@ namespace ProjectOrbitalRing.Rendering
         private static readonly List<SlotState> pending = new List<SlotState>();
         private static readonly Mesh[] meshes = new Mesh[(int)Surface.UnavailableLight + 1];
         private static readonly Mesh[][] visibleMeshes = new Mesh[(int)Surface.UnavailableLight + 1][];
+        private static readonly Mesh[] distantMeshes = new Mesh[(int)Surface.UnavailableLight + 1];
+        private static readonly Mesh[][] distantVisibleMeshes = new Mesh[(int)Surface.UnavailableLight + 1][];
         private static readonly List<Mesh> drawMeshes = new List<Mesh>();
         private static readonly Material[] materials = new Material[(int)Surface.UnavailableLight + 1];
         private static Material acceleratorSource;
+        private static Camera detailCamera;
+        private static bool useDistantGeometry;
         private static int[] localTracks = new int[0];
         private static bool tracksDirty = true;
         private static readonly MaterialPropertyBlock lighting = new MaterialPropertyBlock();
@@ -98,6 +108,7 @@ namespace ProjectOrbitalRing.Rendering
         internal static int BeamInterfaceCount { get; private set; }
         internal static int PowerInterfaceCount { get; private set; }
         internal static int TriangleCount { get; private set; }
+        internal static int DistantTriangleCount { get; private set; }
         internal static int RebuildCount { get; private set; }
 
         internal static void Update()
@@ -217,9 +228,11 @@ namespace ProjectOrbitalRing.Rendering
         private static void Publish(AttachmentBuild candidate)
         {
             var chunks = new Mesh[meshes.Length][];
+            var distantChunks = new Mesh[meshes.Length][];
             for (int index = 0; index < chunks.Length; index++)
             {
                 chunks[index] = candidate.VisibleMeshes[index]?.ToArray();
+                distantChunks[index] = candidate.DistantVisibleMeshes[index]?.ToArray();
             }
 
             // Candidates retain ownership until every surface is ready for publication.
@@ -228,11 +241,19 @@ namespace ProjectOrbitalRing.Rendering
             {
                 meshes[index] = candidate.Meshes[index];
                 candidate.Meshes[index] = null;
+                distantMeshes[index] = candidate.DistantMeshes[index];
+                candidate.DistantMeshes[index] = null;
                 if (candidate.VisibleMeshes[index] != null)
                 {
                     visibleMeshes[index] = chunks[index];
                     candidate.VisibleMeshes[index].Clear();
                     drawMeshes.Capacity = Math.Max(drawMeshes.Capacity, visibleMeshes[index].Length);
+                }
+                if (candidate.DistantVisibleMeshes[index] != null)
+                {
+                    distantVisibleMeshes[index] = distantChunks[index];
+                    candidate.DistantVisibleMeshes[index].Clear();
+                    drawMeshes.Capacity = Math.Max(drawMeshes.Capacity, distantVisibleMeshes[index].Length);
                 }
             }
 
@@ -243,6 +264,7 @@ namespace ProjectOrbitalRing.Rendering
             BeamInterfaceCount = candidate.BeamInterfaceCount;
             PowerInterfaceCount = candidate.PowerInterfaceCount;
             TriangleCount = candidate.TriangleCount;
+            DistantTriangleCount = candidate.DistantTriangleCount;
             RebuildCount++;
         }
 
@@ -261,10 +283,18 @@ namespace ProjectOrbitalRing.Rendering
                 OrbitalMeshChunks.Destroy(candidate.VisibleMeshes[index]);
                 candidate.VisibleMeshes[index]?.Clear();
                 candidate.VisibleMeshes[index] = null;
+                OrbitalMeshChunks.Destroy(candidate.DistantVisibleMeshes[index]);
+                candidate.DistantVisibleMeshes[index]?.Clear();
+                candidate.DistantVisibleMeshes[index] = null;
                 if (candidate.Meshes[index] != null)
                 {
                     UnityEngine.Object.Destroy(candidate.Meshes[index]);
                     candidate.Meshes[index] = null;
+                }
+                if (candidate.DistantMeshes[index] != null)
+                {
+                    UnityEngine.Object.Destroy(candidate.DistantMeshes[index]);
+                    candidate.DistantMeshes[index] = null;
                 }
             }
         }
@@ -350,11 +380,26 @@ namespace ProjectOrbitalRing.Rendering
 
         private static IEnumerable<object> Rebuild(AttachmentBuild candidate)
         {
+            foreach (bool distant in new[] { false, true })
+            {
+                foreach (object step in RebuildLevel(candidate, distant))
+                {
+                    yield return step;
+                }
+                if (candidate.Stale)
+                {
+                    yield break;
+                }
+            }
+        }
+
+        private static IEnumerable<object> RebuildLevel(AttachmentBuild candidate, bool distant)
+        {
             PlanetFactory factory = candidate.Factory;
             var builders = new OrbitalAttachmentMesh[meshes.Length];
             for (int index = 0; index < builders.Length; index++)
             {
-                builders[index] = new OrbitalAttachmentMesh();
+                builders[index] = new OrbitalAttachmentMesh(distant, IsSignalSurface((Surface)index));
             }
             foreach (SlotState slot in candidate.Slots)
             {
@@ -385,7 +430,10 @@ namespace ProjectOrbitalRing.Rendering
                         Vector3 along = Vector3.Cross(up, Vector3.up).normalized * sign;
                         Vector3 across = Vector3.Cross(along, up).normalized;
                         OrbitalFacilityGeometry.Seat(builders, center, across, up, along, seatState);
-                        candidate.SocketCount++;
+                        if (!distant)
+                        {
+                            candidate.SocketCount++;
+                        }
                         yield return null;
                     }
                 }
@@ -399,7 +447,10 @@ namespace ProjectOrbitalRing.Rendering
                     }
                     OrbitalFacilityGeometry.Support(builders, factory, slot.Ring, longitude,
                         slot.Entity, slot.Tracks, seatLongitudes);
-                    candidate.OccupiedSlots++;
+                    if (!distant)
+                    {
+                        candidate.OccupiedSlots++;
+                    }
                     yield return null;
                 }
 
@@ -410,7 +461,8 @@ namespace ProjectOrbitalRing.Rendering
                         candidate.Stale = true;
                         yield break;
                     }
-                    if (OrbitalFacilityBays.Beam(builders, factory, slot.Ring, longitude, slot.Entity))
+                    bool connected = OrbitalFacilityBays.Beam(builders, factory, slot.Ring, longitude, slot.Entity);
+                    if (connected && !distant)
                     {
                         candidate.BeamInterfaceCount++;
                     }
@@ -424,7 +476,8 @@ namespace ProjectOrbitalRing.Rendering
                         candidate.Stale = true;
                         yield break;
                     }
-                    if (OrbitalFacilityBays.Power(builders, factory, slot.Ring, longitude, slot.Entity))
+                    bool connected = OrbitalFacilityBays.Power(builders, factory, slot.Ring, longitude, slot.Entity);
+                    if (connected && !distant)
                     {
                         candidate.PowerInterfaceCount++;
                     }
@@ -434,24 +487,35 @@ namespace ProjectOrbitalRing.Rendering
                 yield return null;
             }
 
+            Mesh[] destination = distant ? candidate.DistantMeshes : candidate.Meshes;
+            List<Mesh>[] visibleDestination = distant ? candidate.DistantVisibleMeshes : candidate.VisibleMeshes;
             for (int index = 0; index < builders.Length; index++)
             {
                 if (builders[index].TriangleCount == 0)
                 {
                     continue;
                 }
-                candidate.Meshes[index] = builders[index].Build(
+                destination[index] = builders[index].Build(
                     index == (int)Surface.AcceleratorArmor || index == (int)Surface.PowerPanel);
-                candidate.Meshes[index].name = "OrbitalRing.FacilityAttachments." + (Surface)index;
+                destination[index].name = "OrbitalRing.FacilityAttachments." + (Surface)index
+                    + (distant ? ".Distant" : ".Near");
                 yield return null;
                 var chunks = new List<Mesh>();
-                candidate.VisibleMeshes[index] = chunks;
-                foreach (var step in OrbitalMeshChunks.Create(candidate.Meshes[index], chunks, 64))
+                visibleDestination[index] = chunks;
+                foreach (var step in OrbitalMeshChunks.Create(destination[index], chunks, 64))
                 {
                     yield return step;
                 }
+                destination[index].UploadMeshData(true);
 
-                candidate.TriangleCount += builders[index].TriangleCount;
+                if (distant)
+                {
+                    candidate.DistantTriangleCount += builders[index].TriangleCount;
+                }
+                else
+                {
+                    candidate.TriangleCount += builders[index].TriangleCount;
+                }
                 yield return null;
             }
         }
@@ -483,9 +547,12 @@ namespace ProjectOrbitalRing.Rendering
             }
             OrbitalRenderBounds.Prepare(camera);
             float planetRadius = factory.planet.realRadius - 2;
+            bool distant = UseDistantGeometry(camera, factory.planet.realRadius);
+            Mesh[] colorMeshes = distant ? distantMeshes : meshes;
+            Mesh[][] colorChunks = distant ? distantVisibleMeshes : visibleMeshes;
             for (int index = 0; index < meshes.Length; index++)
             {
-                Mesh mesh = meshes[index];
+                Mesh mesh = colorMeshes[index];
                 if (mesh == null)
                 {
                     continue;
@@ -515,7 +582,14 @@ namespace ProjectOrbitalRing.Rendering
                     lighting.SetColor("_EmissionColor", tint * intensity);
                 }
 
-                Mesh[] chunks = visibleMeshes[index];
+                // Shadow geometry remains fixed across camera detail levels and screen-space visibility.
+                if (!signal && distantMeshes[index] != null)
+                {
+                    Graphics.DrawMesh(distantMeshes[index], Matrix4x4.identity, material, 0, camera, 0, lighting,
+                        ShadowCastingMode.ShadowsOnly, false);
+                }
+
+                Mesh[] chunks = colorChunks[index];
                 if (chunks == null)
                 {
                     continue;
@@ -533,14 +607,8 @@ namespace ProjectOrbitalRing.Rendering
                 if (drawMeshes.Count * 3 > chunks.Length)
                 {
                     Graphics.DrawMesh(mesh, Matrix4x4.identity, material, 0, camera, 0, lighting,
-                        signal ? ShadowCastingMode.Off : ShadowCastingMode.On, !signal);
+                        ShadowCastingMode.Off, !signal);
                     continue;
-                }
-
-                if (!signal)
-                {
-                    Graphics.DrawMesh(mesh, Matrix4x4.identity, material, 0, camera, 0, lighting,
-                        ShadowCastingMode.ShadowsOnly, false);
                 }
 
                 foreach (Mesh chunk in drawMeshes)
@@ -549,6 +617,28 @@ namespace ProjectOrbitalRing.Rendering
                         ShadowCastingMode.Off, !signal);
                 }
             }
+        }
+
+        private static bool UseDistantGeometry(Camera camera, float planetRadius)
+        {
+            float distance = camera.orthographic ? camera.orthographicSize
+                : camera.transform.position.magnitude - planetRadius;
+            float threshold = camera.orthographic ? DistantOrthographicSize : DistantCameraAltitude;
+            float margin = camera.orthographic ? 8 : 12;
+            if (detailCamera != camera)
+            {
+                detailCamera = camera;
+                useDistantGeometry = distance >= threshold;
+            }
+            else if (useDistantGeometry)
+            {
+                useDistantGeometry = distance >= threshold - margin;
+            }
+            else
+            {
+                useDistantGeometry = distance >= threshold + margin;
+            }
+            return useDistantGeometry;
         }
 
         private static Material MaterialFor(Surface surface)
@@ -661,11 +751,18 @@ namespace ProjectOrbitalRing.Rendering
             {
                 OrbitalMeshChunks.Destroy(visibleMeshes[index]);
                 visibleMeshes[index] = null;
+                OrbitalMeshChunks.Destroy(distantVisibleMeshes[index]);
+                distantVisibleMeshes[index] = null;
                 if (meshes[index] != null)
                 {
                     UnityEngine.Object.Destroy(meshes[index]);
                 }
                 meshes[index] = null;
+                if (distantMeshes[index] != null)
+                {
+                    UnityEngine.Object.Destroy(distantMeshes[index]);
+                }
+                distantMeshes[index] = null;
             }
         }
 
@@ -677,6 +774,8 @@ namespace ProjectOrbitalRing.Rendering
             previous.Clear();
             pending.Clear();
             observedFactory = null;
+            detailCamera = null;
+            useDistantGeometry = false;
             nextProbe = 0;
             tracksDirty = true;
             SocketCount = 0;
@@ -684,6 +783,7 @@ namespace ProjectOrbitalRing.Rendering
             BeamInterfaceCount = 0;
             PowerInterfaceCount = 0;
             TriangleCount = 0;
+            DistantTriangleCount = 0;
         }
 
         internal static void Dispose()

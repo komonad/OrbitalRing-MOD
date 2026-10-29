@@ -10,8 +10,17 @@ namespace ProjectOrbitalRing.Rendering
         private readonly List<Vector3> normals = new List<Vector3>();
         private readonly List<Vector2> coordinates = new List<Vector2>();
         private readonly List<int> triangles = new List<int>();
+        private readonly bool distant;
+        private readonly bool flattenPanels;
+
+        internal OrbitalAttachmentMesh(bool distant = false, bool flattenPanels = false)
+        {
+            this.distant = distant;
+            this.flattenPanels = distant && flattenPanels;
+        }
 
         internal int TriangleCount => triangles.Count / 3;
+        internal bool IsDistant => distant;
 
         internal void Panel(Vector3 center, Vector3 horizontal, Vector3 vertical, Vector3 normal,
             float width, float height)
@@ -29,6 +38,23 @@ namespace ProjectOrbitalRing.Rendering
 
         internal void Box(Vector3 center, Vector3 side, Vector3 up, Vector3 forward, Vector3 size)
         {
+            if (flattenPanels)
+            {
+                if (size.y <= size.x && size.y <= size.z)
+                {
+                    Panel(center + up * (size.y * 0.5f), side, forward, up, size.x, size.z);
+                }
+                else if (size.x <= size.z)
+                {
+                    Panel(center + side * (size.x * 0.5f), forward, up, side, size.z, size.y);
+                }
+                else
+                {
+                    Panel(center + forward * (size.z * 0.5f), side, up, forward, size.x, size.y);
+                }
+                return;
+            }
+
             Vector3[] axes =
             {
                 side * size.x * 0.5f,
@@ -51,6 +77,12 @@ namespace ProjectOrbitalRing.Rendering
 
         internal void BeveledBox(Vector3 center, Vector3 side, Vector3 up, Vector3 forward, Vector3 size, float bevel)
         {
+            if (distant)
+            {
+                Box(center, side, up, forward, size);
+                return;
+            }
+
             float halfWidth = size.x * 0.5f;
             float halfHeight = size.y * 0.5f;
             bevel = Mathf.Min(bevel, Mathf.Min(halfWidth, halfHeight));
@@ -108,6 +140,11 @@ namespace ProjectOrbitalRing.Rendering
         internal void Tube(Vector3 center, Vector3 axis, Vector3 up, float innerRadius, float outerRadius,
             float length, int segments = 32, bool continuousUv = false)
         {
+            if (distant)
+            {
+                segments = Mathf.Clamp(segments / 3, 6, 16);
+            }
+
             Vector3 side = Vector3.Cross(up, axis).normalized;
             up = Vector3.Cross(axis, side).normalized;
             Vector3 depth = axis * length * 0.5f;
@@ -154,10 +191,21 @@ namespace ProjectOrbitalRing.Rendering
 
         internal void Sweep(IReadOnlyList<Vector3> path, Vector3 referenceUp, float radius)
         {
-            const int segments = 16;
+            int segments = distant ? 6 : 16;
             if (path.Count < 2)
             {
                 return;
+            }
+
+            if (distant && path.Count > 9)
+            {
+                var simplified = new Vector3[9];
+                for (int index = 0; index < simplified.Length; index++)
+                {
+                    int source = Mathf.RoundToInt((float)index * (path.Count - 1) / (simplified.Length - 1));
+                    simplified[index] = path[source];
+                }
+                path = simplified;
             }
 
             var tangents = new Vector3[path.Count];
@@ -212,6 +260,11 @@ namespace ProjectOrbitalRing.Rendering
         internal void ArcBand(Vector3 center, Vector3 axis, Vector3 forward, float innerRadius, float outerRadius,
             float height, float halfAngle, int segments = 16)
         {
+            if (distant)
+            {
+                segments = Mathf.Clamp(segments / 3, 6, 12);
+            }
+
             Vector3 side = Vector3.Cross(axis, forward).normalized;
             forward = Vector3.Cross(side, axis).normalized;
             Vector3 lower = center - axis * (height * 0.5f);
