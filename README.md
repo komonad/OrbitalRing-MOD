@@ -78,6 +78,23 @@ Other modifications include but are not limited to:
 <a href="https://ibb.co/GfDL6wwz"><img src="https://i.ibb.co/0pLS7NNH/pet1-FMQ-md.png" alt="pet1-FMQ-md" border="0"></a>
 
 
+## 轨道结构模式 | Structural tracks
+
+`BepInEx/config/org.ProfessorCat305.OrbitalRing.cfg` 中的设置控制轨道行为，修改后重启游戏：
+
+```ini
+[Orbital tracks]
+StructuralTracks = true
+```
+
+此项默认启用。轨道连接组件、星环电网组件和粒子加速轨道支持双向拖建，连接时自动统一内部方向。
+每个节点最多连接两个同类型、同环带的轨道节点，轨道作为纯结构使用。已有轨道需先清空货物，再启用此项。
+
+The setting above is enabled by default and takes effect after restarting the game. Orbital tracks support construction
+in either direction, with their internal connections oriented automatically. Each node accepts up to two matching track
+neighbors in the same orbital band. Existing tracks must be emptied before enabling structural mode.
+Setting `StructuralTracks = false` enables the native directional belt and cargo behavior.
+
 ## 意见和反馈 | Feedback and suggestions
 
 如果您对本Mod有宝贵的意见或建议，
